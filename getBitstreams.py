@@ -73,8 +73,8 @@ def main():
         try:
             secrets = __import__(secretsVersion)
             print('Accessing Production')
-        except ImportError:
-            print('Accessing Stage')
+        except ImportError as e:
+            print(e)
     else:
         print('Accessing Stage')
 
@@ -98,7 +98,6 @@ def main():
 
     if not args.verify:
         args.verify = secrets.verify
-skippedCollections = secrets.skippedCollections
 
     if args.handle:
         handle = args.handle
@@ -134,35 +133,48 @@ skippedCollections = secrets.skippedCollections
     startTime = time.time()
     data = {'email': args.email, 'password': args.password}
     header = {'content-type': 'application/json', 'accept': 'application/json'}
-    session = requests.post(args.baseURL+'/rest/login', headers=header, verify=args.verify, params=data, timeout=args.rtimeout).cookies['JSESSIONID']
+    url = args.baseURL+'/rest/login'
+    print('posting to {}'.format(url))
+    try:
+        session = requests.post(url, headers=header, verify=args.verify, params=data, timeout=args.rtimeout, allow_redirects=True).cookies['JSESSIONID']
+    except requests.exceptions.RequestException as e:
+        print("caught exception...")
+        print(e)
+        return
     cookies = {'JSESSIONID': session}
     print('authenticated')
 
     # NOTE: expanding items (of collections) and bitstreams (of items) to get the count
     endpoint = args.baseURL+'/rest/handle/'+handle+'?expand=items,bitstreams'
-    dsObject = requests.get(endpoint, headers=header, cookies=cookies, verify=args.verify, timeout=args.rtimeout)
-    dsObject.raise_for_status()  # ensure we notice bad responses
-    dsObject = dsObject.json()
-    if args.verbose: print(dsObject)
-    dsObjectID = dsObject['uuid']
-    # TODO: extend
-    if dsObject['type'] == 'collection':
-        if args.verbose: print(dsObject['type'])
+    try:
+        dsObject = requests.get(endpoint, headers=header, cookies=cookies, verify=args.verify, timeout=args.rtimeout)
+        dsObject.raise_for_status()  # ensure we notice bad responses
+        dsObject = dsObject.json()
+        if args.verbose: print(dsObject)
+        dsObjectID = dsObject['uuid']
+        # TODO: extend
+        if dsObject['type'] == 'collection':
+            if args.verbose: print(dsObject['type'])
 
-        itemCount = len(dsObject['items'])
-        print('{} items'.format(itemCount))
-        for collItem in dsObject['items']:
-            endpoint = args.baseURL + collItem['link'] + '?expand=bitstreams'
-            item = requests.get(endpoint, headers=header, cookies=cookies, verify=args.verify, timeout=args.rtimeout)
-            item.raise_for_status()  # ensure we notice bad responses
-            item = item.json()
-            processItem(item, args)
+            itemCount = len(dsObject['items'])
+            print('{} items'.format(itemCount))
+            for collItem in dsObject['items']:
+                endpoint = args.baseURL + collItem['link'] + '?expand=bitstreams'
+                item = requests.get(endpoint, headers=header, cookies=cookies, verify=args.verify, timeout=args.rtimeout)
+                item.raise_for_status()  # ensure we notice bad responses
+                item = item.json()
+                processItem(item, args)
 
-    elif dsObject['type'] == 'item':
-        processItem(dsObject, args)
+        elif dsObject['type'] == 'item':
+            processItem(dsObject, args)
 
-    else:
-        print('object is of an invalid type for this script ({}). please enter the handle of an item or a collection.'.format(dsObject['type']))
+        else:
+            print('object is of an invalid type for this script ({}). please enter the handle of an item or a collection.'.format(dsObject['type']))
+
+    except requests.exceptions.RequestException as e:
+        print("caught exception...")
+        print(e)
+        return
 
     logout = requests.post(args.baseURL+'/rest/logout', headers=header, cookies=cookies, verify=args.verify, timeout=args.rtimeout)
 
